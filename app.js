@@ -1,9 +1,11 @@
-// YOLOv8 via ONNX Runtime Web — loads dynamically to allow graceful degradation.
-const ONNX_RUNTIME_CDN = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist";
+// YOLOv8 via ONNX Runtime Web — multiple CDN fallbacks
+const ONNX_RUNTIME_URLS = [
+  "https://unpkg.com/onnxruntime-web@1.18.0/dist/ort.web.min.js",
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/ort.web.min.js",
+  "https://esm.sh/onnxruntime-web@1.18.0/dist/ort.web.min.js",
+];
 const YOLOV8_MODEL_URLS = [
-  // Try medium first (better accuracy)
   "https://huggingface.co/Xenova/yolov8m-coco/resolve/main/model.onnx",
-  // Fallback to nano (faster, smaller)
   "https://huggingface.co/Xenova/yolov8n-coco/resolve/main/model.onnx",
 ];
 
@@ -398,16 +400,34 @@ async function loadModel() {
   try {
     updateStatus("Getting ready");
 
-    console.log("Loading ONNX Runtime...");
-    const ort = await import(`${ONNX_RUNTIME_CDN}/ort.web.min.js`);
-    console.log("ONNX Runtime loaded");
+    // Try multiple CDNs for ONNX Runtime
+    let ort = null;
+    let lastRuntimeErr = null;
 
-    // Initialize ONNX Runtime with WebAssembly backend
-    ort.env.wasm.simdSupported = true;
-    ort.env.wasm.numThreads = 1;
+    for (const runtimeUrl of ONNX_RUNTIME_URLS) {
+      try {
+        console.log(`Trying ONNX Runtime from: ${runtimeUrl}`);
+        ort = await import(runtimeUrl);
+        console.log("ONNX Runtime loaded");
+        break;
+      } catch (err) {
+        console.warn(`ONNX Runtime failed (${runtimeUrl}):`, err.message);
+        lastRuntimeErr = err;
+      }
+    }
+
+    if (!ort) {
+      throw lastRuntimeErr || new Error("Could not load ONNX Runtime from any CDN");
+    }
+
+    // Initialize ONNX Runtime
+    if (ort.env?.wasm) {
+      ort.env.wasm.simdSupported = true;
+      ort.env.wasm.numThreads = 1;
+    }
 
     // Try each model URL until one works
-    let lastErr = null;
+    let lastModelErr = null;
     for (const modelUrl of YOLOV8_MODEL_URLS) {
       try {
         console.log(`Trying model: ${modelUrl}`);
@@ -423,12 +443,11 @@ async function loadModel() {
         return;
       } catch (err) {
         console.warn(`Model failed (${modelUrl}):`, err.message);
-        lastErr = err;
+        lastModelErr = err;
       }
     }
 
-    // All URLs failed
-    throw lastErr || new Error("No model URLs available");
+    throw lastModelErr || new Error("No model URLs available");
   } catch (err) {
     console.error("Model load failed:", err);
     const errorMsg = `Could not load AI model. Check your internet. Error: ${err.message}`;
