@@ -148,7 +148,18 @@ async function initApp() {
     console.warn("Web Audio API not available:", e);
   }
 
-  updateStatus("Tap to start");
+  // Automatically request camera access on page load
+  updateStatus("Requesting camera access...");
+  speak("Requesting camera access");
+  try {
+    await requestCamera();
+    updateStatus("Camera ready. Tap to start scanning");
+    speak("Camera ready. Tap anywhere to start scanning");
+  } catch (err) {
+    console.error("Camera request failed:", err);
+    // User will see error in status and hear it spoken
+    ui.toggleButton.disabled = true;
+  }
 }
 
 // ============================================================================
@@ -240,7 +251,11 @@ async function loadModel() {
 
 async function startScanning() {
   try {
-    await requestCamera();
+    // Only request camera if not already active
+    if (!state.cameraActive) {
+      await requestCamera();
+    }
+
     await loadModel();
 
     state.scanning = true;
