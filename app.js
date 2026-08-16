@@ -1,6 +1,6 @@
-// MediaPipe is imported dynamically inside loadModel() so that a CDN failure
-// degrades to "camera works, detection doesn't" instead of killing the module.
-const MEDIAPIPE_CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8";
+// YOLOv8 via ONNX Runtime Web — loads dynamically to allow graceful degradation.
+const ONNX_RUNTIME_CDN = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist";
+const YOLOV8_MODEL_URL = "https://huggingface.co/Xenova/yolov8m-coco/resolve/main/model.onnx";
 
 // ============================================================================
 // CONFIG
@@ -133,15 +133,15 @@ let state = {
   cameraActive: false,
   modelLoaded: false,
   videoElement: null,
-  detector: null,
+  onnxSession: null, // YOLOv8 ONNX Runtime session
   audioContext: null,
-  lastAnnouncements: new Map(), // Track {distance, time} per class for change detection and heartbeat
-  lastInterrupt: { label: null, time: 0 }, // throttles the very-close warning
+  lastAnnouncements: new Map(),
+  lastInterrupt: { label: null, time: 0 },
   detectionStartTime: 0,
-  lastDetections: [], // For the debug overlay
-  cameras: [], // videoinput devices from enumerateDevices()
+  lastDetections: [],
+  cameras: [],
   activeDeviceId: null,
-  cameraWanted: false, // true once the page has a working camera to restore
+  cameraWanted: false,
 };
 
 // ============================================================================
@@ -391,27 +391,21 @@ async function loadModel() {
   if (state.modelLoaded) return;
 
   try {
-    // Status only — startScanning has already spoken, and stacking a second
-    // utterance on top of it just delays the object announcements.
     updateStatus("Getting ready");
 
-    // Note: the bundle is published as .mjs — .js 404s on the CDN.
-    const { FilesetResolver, ObjectDetector } = await import(
-      `${MEDIAPIPE_CDN}/vision_bundle.mjs`
+    // Load ONNX Runtime Web
+    const ort = await import(
+      `${ONNX_RUNTIME_CDN}/ort.web.min.js`
     );
 
-    const vision = await FilesetResolver.forVisionTasks(`${MEDIAPIPE_CDN}/wasm`);
+    // Initialize ONNX Runtime with WebAssembly backend for better mobile performance
+    ort.env.wasm.simdSupported = true;
+    ort.env.wasm.numThreads = 1; // Avoid thread contention on phones
 
-    const modelAsset = `https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/float16/1/efficientdet_lite2.tflite`;
-
-    state.detector = await ObjectDetector.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath: modelAsset,
-        delegate: "GPU", // Use GPU if available, fallback to CPU
-      },
-      scoreThreshold: CONFIG.minConfidence,
-      maxResults: 10,
-      runningMode: "VIDEO",
+    // Create session with YOLOv8 model
+    state.onnxSession = await ort.InferenceSession.create(YOLOV8_MODEL_URL, {
+      executionProviders: ["webgpu", "wasm"],
+      graphOptimizationLevel: "all",
     });
 
     state.modelLoaded = true;
@@ -483,6 +477,107 @@ function toggleScanning() {
   }
 }
 
+// COCO class names for YOLOv8
+const COCO_CLASSES = [
+  "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
+  "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "cat", "dog",
+  "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
+  "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite",
+  "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle",
+  "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich",
+  "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
+  "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote",
+  "keyboard", "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock",
+  "vase", "scissors", "teddy bear", "hair drier", "toothbrush"
+];
+
+async function detectWithYOLOv8(videoElement) {
+  if (!state.onnxSession) throw new Error("Model not loaded");
+
+  const ort = await import(`${ONNX_RUNTIME_CDN}/ort.web.min.js`);
+
+  // Prepare input: letterbox resize to 640x640
+  const canvas = document.createElement("canvas");
+  canvas.width = 640;
+  canvas.height = 640;
+  const ctx = canvas.getContext("2d");
+
+  // Letterbox: scale and pad to 640x640
+  const scale = Math.min(640 / videoElement.videoWidth, 640 / videoElement.videoHeight);
+  const x = (640 - videoElement.videoWidth * scale) / 2;
+  const y = (640 - videoElement.videoHeight * scale) / 2;
+
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, 640, 640);
+  ctx.drawImage(
+    videoElement,
+    x,
+    y,
+    videoElement.videoWidth * scale,
+    videoElement.videoHeight * scale
+  );
+
+  // Extract image data and normalize
+  const imageData = ctx.getImageData(0, 0, 640, 640);
+  const data = imageData.data;
+  const input = new Float32Array(3 * 640 * 640);
+
+  for (let i = 0; i < data.length; i += 4) {
+    input[i / 4] = data[i] / 255;                    // R
+    input[i / 4 + 640 * 640] = data[i + 1] / 255;   // G
+    input[i / 4 + 2 * 640 * 640] = data[i + 2] / 255; // B
+  }
+
+  // Run inference
+  const inputTensor = new ort.Tensor("float32", input, [1, 3, 640, 640]);
+  const results = await state.onnxSession.run({ images: inputTensor });
+
+  // Parse YOLOv8 output (1, 84, 8400)
+  const output = results.output0.data;
+  const detections = [];
+
+  for (let i = 0; i < 8400; i++) {
+    const conf = output[4 * 8400 + i]; // Objectness score
+    if (conf < CONFIG.minConfidence) continue;
+
+    const x = output[0 * 8400 + i];
+    const y = output[1 * 8400 + i];
+    const w = output[2 * 8400 + i];
+    const h = output[3 * 8400 + i];
+
+    let maxClass = 0,
+      maxScore = 0;
+    for (let c = 0; c < 80; c++) {
+      const score = output[(5 + c) * 8400 + i];
+      if (score > maxScore) {
+        maxScore = score;
+        maxClass = c;
+      }
+    }
+
+    const finalScore = conf * maxScore;
+    if (finalScore < CONFIG.minConfidence) continue;
+
+    // Convert from letterbox coords to original video coords
+    const origX = ((x - x) / scale) - x;
+    const origY = ((y - y) / scale) - y;
+    const origW = (w / scale);
+    const origH = (h / scale);
+
+    detections.push({
+      boundingBox: {
+        originX: (origX - origW / 2) / videoElement.videoWidth,
+        originY: (origY - origH / 2) / videoElement.videoHeight,
+        width: origW / videoElement.videoWidth,
+        height: origH / videoElement.videoHeight,
+      },
+      categories: [{ categoryName: COCO_CLASSES[maxClass], score: finalScore }],
+    });
+  }
+
+  return detections;
+}
+
 async function detectionLoop() {
   if (!state.scanning) return;
 
@@ -494,13 +589,12 @@ async function detectionLoop() {
     state.modelLoaded
   ) {
     try {
-      const detections = state.detector.detectForVideo(state.videoElement, now);
+      const detections = await detectWithYOLOv8(state.videoElement);
 
-      if (detections.detections && detections.detections.length > 0) {
-        state.lastDetections = detections.detections;
-        drawOverlay(detections.detections);
-        // Deliberately not awaited: announcements must never pace the loop.
-        processDetections(detections.detections);
+      if (detections && detections.length > 0) {
+        state.lastDetections = detections;
+        drawOverlay(detections);
+        processDetections(detections);
       } else {
         state.lastDetections = [];
         clearOverlay();
