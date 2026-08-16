@@ -7,43 +7,30 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="app" class="app">
-    <!-- Live camera preview (visible so sighted testers can confirm the feed) -->
-    <div class="stage">
-      <video id="camera-feed" autoplay muted playsinline></video>
-      <canvas id="detection-canvas"></canvas>
-      <div id="no-signal" class="no-signal">No camera signal</div>
-    </div>
-
-    <!-- Main control area -->
-    <div class="container">
-      <div class="status-bar" aria-live="polite" aria-atomic="true" id="status-message">
-        Ready to scan. Tap anywhere to start.
-      </div>
-
-      <div class="camera-panel" id="camera-panel">
-        <div class="camera-row">
-          <span class="camera-dot" id="camera-dot" aria-hidden="true"></span>
-          <span id="camera-label">Detecting cameras&hellip;</span>
-        </div>
-        <div class="camera-meta" id="camera-meta"></div>
-        <button id="switch-camera" class="switch-camera" hidden>Switch camera</button>
-      </div>
-
-      <div class="controls">
-        <button id="toggle-button" class="toggle-button" aria-label="Start scanning">
-          <span class="button-text">TAP TO START</span>
-        </button>
-
-        <div class="info-section">
-          <h1>Object Scanner</h1>
-          <p>Point your camera at objects to identify them, their distance, and direction.</p>
-        </div>
-      </div>
-    </div>
+  <!-- Camera preview sits behind everything, dimmed. It exists for sighted
+       testers; nothing in the interface depends on being able to see it. -->
+  <div class="stage" aria-hidden="true">
+    <video id="camera-feed" autoplay muted playsinline></video>
+    <canvas id="detection-canvas"></canvas>
   </div>
 
-  <!-- MediaPipe Tasks Vision (loaded via app.js) -->
+  <!-- The entire screen is the one and only control. -->
+  <button id="toggle-button" class="tap-area" aria-describedby="status-message">
+    <span class="action" id="action-text">Tap to start</span>
+    <span class="hint" id="hint-text">Anywhere on the screen</span>
+  </button>
+
+  <!-- Spoken aloud as well, so this is a mirror of the audio, not extra info. -->
+  <p id="status-message" class="status" role="status" aria-live="polite">
+    Starting up
+  </p>
+
+  <button id="switch-camera" class="switch-camera" hidden>Switch camera</button>
+
+  <!-- Diagnostics for sighted testing only; hidden from screen readers so it
+       never lands between the user and the button. -->
+  <p id="camera-info" class="camera-info" aria-hidden="true"></p>
+
   <script type="module" src="app.js"></script>
 </body>
 </html>

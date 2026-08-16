@@ -144,15 +144,43 @@ let state = {
 
 const ui = {
   toggleButton: document.getElementById("toggle-button"),
+  actionText: document.getElementById("action-text"),
+  hintText: document.getElementById("hint-text"),
   statusMessage: document.getElementById("status-message"),
   videoElement: document.getElementById("camera-feed"),
   canvas: document.getElementById("detection-canvas"),
-  noSignal: document.getElementById("no-signal"),
-  cameraDot: document.getElementById("camera-dot"),
-  cameraLabel: document.getElementById("camera-label"),
-  cameraMeta: document.getElementById("camera-meta"),
+  cameraInfo: document.getElementById("camera-info"),
   switchCamera: document.getElementById("switch-camera"),
 };
+
+// The button carries the whole interface, so its three states are defined in
+// one place: what it says, what it hints, and how a screen reader announces it.
+function setButtonState(mode) {
+  const modes = {
+    start: {
+      action: "Tap to start",
+      hint: "Anywhere on the screen",
+      label: "Start scanning for objects",
+    },
+    stop: {
+      action: "Tap to stop",
+      hint: "Scanning for objects",
+      label: "Stop scanning",
+    },
+    unavailable: {
+      action: "Camera needed",
+      hint: "Allow camera access, then reload",
+      label: "Camera unavailable. Allow camera access and reload the page.",
+    },
+  };
+
+  const next = modes[mode];
+  ui.actionText.textContent = next.action;
+  ui.hintText.textContent = next.hint;
+  ui.toggleButton.setAttribute("aria-label", next.label);
+  document.body.classList.toggle("scanning", mode === "stop");
+  ui.toggleButton.disabled = mode === "unavailable";
+}
 
 // ============================================================================
 // INIT
@@ -164,20 +192,21 @@ async function initApp() {
   state.videoElement = ui.videoElement;
 
   if (!navigator.mediaDevices?.getUserMedia) {
-    setCameraStatus("error", "getUserMedia unavailable", "Needs HTTPS or localhost");
-    updateStatus("Camera API unavailable. Serve this page over HTTPS or localhost.");
-    ui.toggleButton.disabled = true;
+    setCameraInfo("getUserMedia unavailable — needs HTTPS or localhost");
+    updateStatus("Camera unavailable on this page", { error: true });
+    setButtonState("unavailable");
     return;
   }
 
   // Automatically request camera access on page load
-  updateStatus("Requesting camera access...");
+  setButtonState("start");
+  updateStatus("Asking for camera permission");
   try {
     await requestCamera();
-    updateStatus("Camera ready. Tap to start scanning");
+    updateStatus("Ready");
   } catch (err) {
     console.error("Camera request failed:", err);
-    ui.toggleButton.disabled = true;
+    setButtonState("unavailable");
   }
 }
 
@@ -205,7 +234,9 @@ async function refreshCameraList() {
   const devices = await navigator.mediaDevices.enumerateDevices();
   // Labels are only populated once permission has been granted
   state.cameras = devices.filter((d) => d.kind === "videoinput");
-  ui.switchCamera.hidden = state.cameras.length < 2;
+  const multiple = state.cameras.length > 1;
+  ui.switchCamera.hidden = !multiple;
+  document.body.classList.toggle("has-switch", multiple);
   return state.cameras;
 }
 
@@ -227,8 +258,8 @@ function buildConstraintAttempts(deviceId) {
 }
 
 async function requestCamera(deviceId = null) {
-  updateStatus("Requesting camera access...");
-  setCameraStatus("pending", "Requesting camera access…");
+  updateStatus("Asking for camera permission");
+  setCameraInfo("requesting camera…");
 
   // Enumerate before permission so we can report "no camera attached" distinctly
   // from "permission denied" — labels stay blank until access is granted.
@@ -254,8 +285,8 @@ async function requestCamera(deviceId = null) {
 
   if (!stream) {
     const errorMsg = describeCameraError(lastErr);
-    setCameraStatus("error", errorMsg, lastErr?.name || "");
-    updateStatus(errorMsg);
+    setCameraInfo(lastErr?.name || "camera error");
+    updateStatus(errorMsg, { error: true });
     speak(errorMsg);
     throw lastErr || new Error("Camera unavailable");
   }
@@ -272,22 +303,17 @@ async function requestCamera(deviceId = null) {
   await waitForVideoReady(state.videoElement);
 
   state.cameraActive = true;
-  ui.noSignal.hidden = true;
 
   const label = track?.label || "Camera";
   const facing = settings.facingMode ? ` · ${settings.facingMode}` : "";
   const res = `${state.videoElement.videoWidth}×${state.videoElement.videoHeight}`;
   const fps = settings.frameRate ? ` @ ${Math.round(settings.frameRate)}fps` : "";
-  setCameraStatus(
-    "live",
-    label,
-    `${res}${fps}${facing} · ${state.cameras.length} camera${state.cameras.length === 1 ? "" : "s"} found`
-  );
+  setCameraInfo(`${label} · ${res}${fps}${facing}`);
 
   console.log("Camera active:", { label, settings, resolution: res });
 
-  updateStatus("Camera active");
-  speak("Camera active");
+  updateStatus("Camera ready");
+  speak("Camera ready");
 }
 
 function waitForVideoReady(video) {
@@ -319,13 +345,18 @@ function describeCameraError(err) {
   }
 }
 
-async function switchCamera() {
+async function switchCamera(event) {
+  // The tap area sits underneath; don't toggle scanning as well.
+  event?.stopPropagation();
   if (state.cameras.length < 2) return;
+
+  state.userGestured = true;
   const idx = state.cameras.findIndex((c) => c.deviceId === state.activeDeviceId);
   const next = state.cameras[(idx + 1) % state.cameras.length];
   stopCamera();
   try {
     await requestCamera(next.deviceId);
+    speak("Camera switched");
   } catch (err) {
     console.error("Camera switch failed:", err);
   }
@@ -337,16 +368,13 @@ function stopCamera() {
     state.videoElement.srcObject = null;
   }
   state.cameraActive = false;
-  ui.noSignal.hidden = false;
   clearOverlay();
-  setCameraStatus("idle", "Camera stopped");
-  updateStatus("Camera stopped");
+  setCameraInfo("camera off");
 }
 
-function setCameraStatus(status, label, meta = "") {
-  ui.cameraDot.className = `camera-dot ${status}`;
-  ui.cameraLabel.textContent = label;
-  ui.cameraMeta.textContent = meta;
+// Sighted-testing diagnostics only — this line is aria-hidden in the markup.
+function setCameraInfo(text) {
+  ui.cameraInfo.textContent = text;
 }
 
 // ============================================================================
@@ -357,8 +385,8 @@ async function loadModel() {
   if (state.modelLoaded) return;
 
   try {
-    updateStatus("Loading AI model...");
-    speak("Loading model");
+    updateStatus("Getting ready");
+    speak("Getting ready");
 
     // Note: the bundle is published as .mjs — .js 404s on the CDN.
     const { FilesetResolver, ObjectDetector } = await import(
@@ -380,12 +408,10 @@ async function loadModel() {
     });
 
     state.modelLoaded = true;
-    updateStatus("Model loaded");
-    speak("Model ready");
   } catch (err) {
     console.error("Model load failed:", err);
-    const errorMsg = "Model failed to load. Check your internet connection.";
-    updateStatus(errorMsg);
+    const errorMsg = "Could not get ready. Check your internet connection.";
+    updateStatus(errorMsg, { error: true });
     speak(errorMsg);
     throw err;
   }
@@ -410,18 +436,16 @@ async function startScanning() {
 
     state.scanning = true;
     state.detectionStartTime = Date.now();
-    ui.toggleButton.classList.add("scanning");
-    ui.toggleButton.querySelector(".button-text").textContent = "TAP TO STOP";
+    setButtonState("stop");
 
-    updateStatus("Scanning...");
-    speak("Scanning started");
+    updateStatus("Scanning");
+    speak("Scanning");
 
     detectionLoop();
   } catch (err) {
     console.error("Failed to start scanning:", err);
     state.scanning = false;
-    ui.toggleButton.classList.remove("scanning");
-    ui.toggleButton.querySelector(".button-text").textContent = "TAP TO START";
+    setButtonState("start");
   }
 }
 
@@ -430,10 +454,9 @@ function stopScanning() {
   state.lastAnnouncements.clear();
   stopCamera();
   speechSynthesis.cancel();
-  ui.toggleButton.classList.remove("scanning");
-  ui.toggleButton.querySelector(".button-text").textContent = "TAP TO START";
-  updateStatus("Tap to start");
-  speak("Scanning stopped");
+  setButtonState("start");
+  updateStatus("Stopped");
+  speak("Stopped");
 }
 
 function toggleScanning() {
@@ -608,14 +631,14 @@ function drawOverlay(detections) {
     const score = Math.round((d.categories[0]?.score || 0) * 100);
     const text = `${label} ${score}%`;
 
-    ctx.strokeStyle = "#4ade80";
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
     ctx.strokeRect(box.x, box.y, box.w, box.h);
 
     const metrics = ctx.measureText(text);
     const textHeight = parseInt(ctx.font, 10) * 1.3;
     ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
     ctx.fillRect(box.x, Math.max(0, box.y - textHeight), metrics.width + 10, textHeight);
-    ctx.fillStyle = "#4ade80";
+    ctx.fillStyle = "#ffffff";
     ctx.fillText(text, box.x + 5, Math.max(0, box.y - textHeight) + 2);
   }
 }
@@ -684,8 +707,9 @@ function playPanningTone(centerX) {
 // UI UPDATES
 // ============================================================================
 
-function updateStatus(text) {
+function updateStatus(text, { error = false } = {}) {
   ui.statusMessage.textContent = text;
+  document.body.classList.toggle("error", error);
 }
 
 function sleep(ms) {

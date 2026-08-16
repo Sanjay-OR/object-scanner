@@ -4,32 +4,39 @@
   box-sizing: border-box;
 }
 
+:root {
+  --ink: #ffffff;
+  --paper: #000000;
+  --muted: #9ca3af;
+  --alert: #ff5c5c;
+}
+
+html,
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: #000;
-  color: #fff;
   width: 100%;
-  height: 100vh;
+  height: 100%;
   overflow: hidden;
 }
 
-.app {
-  width: 100%;
-  height: 100%;
-  position: relative;
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
 }
 
 /* ---------------------------------------------------------------------------
-   Camera preview stage — fills the viewport, everything else floats over it
+   Camera preview — dimmed, purely informational for sighted testers
    --------------------------------------------------------------------------- */
 
 .stage {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  background: #0a0a0a;
-  overflow: hidden;
+  background: var(--paper);
 }
 
+/* contain, not cover: the overlay is drawn in frame coordinates, so cropping
+   would hide detections near the edges and blow the labels up on portrait
+   screens. Both elements must use the same fit to stay aligned. */
 #camera-feed,
 #detection-canvas {
   position: absolute;
@@ -39,244 +46,189 @@ body {
   object-fit: contain;
 }
 
-#detection-canvas {
-  pointer-events: none;
-}
-
-.no-signal {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #64748b;
-  font-size: 18px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.no-signal[hidden] {
-  display: none;
+/* Held well back so white text stays legible over any scene */
+#camera-feed {
+  opacity: 0.28;
 }
 
 /* ---------------------------------------------------------------------------
-   Overlay UI
+   The single control: the whole screen
    --------------------------------------------------------------------------- */
 
-.container {
-  position: relative;
+.tap-area {
+  position: fixed;
+  inset: 0;
   width: 100%;
   height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-family: inherit;
+  cursor: pointer;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  padding: 20px;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.action {
+  font-size: clamp(2.5rem, 12vw, 4.5rem);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9);
+}
+
+.hint {
+  font-size: clamp(1rem, 4vw, 1.25rem);
+  color: var(--muted);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.9);
+}
+
+/* Scanning inverts the screen — unmistakable at a glance, and readable with
+   almost any amount of usable vision. The wash is translucent and the feed
+   runs at full brightness underneath, so the preview stays visible instead of
+   being painted over. Composite lands near #e8e8e8, keeping black text above
+   15:1 against it. */
+body.scanning .tap-area {
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--paper);
+}
+
+body.scanning .action,
+body.scanning .hint {
+  text-shadow: none;
+}
+
+body.scanning .hint {
+  color: #4b5563;
+}
+
+body.scanning #camera-feed {
+  opacity: 1;
+}
+
+.tap-area:focus-visible {
+  outline: 6px solid var(--ink);
+  outline-offset: -12px;
+}
+
+body.scanning .tap-area:focus-visible {
+  outline-color: var(--paper);
+}
+
+.tap-area:active .action {
+  transform: scale(0.97);
+}
+
+.tap-area:disabled {
+  cursor: not-allowed;
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------------------------
+   Status line — a mirror of what is spoken aloud
+   --------------------------------------------------------------------------- */
+
+.status {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  padding: 20px 24px;
+  font-size: clamp(1.05rem, 4.5vw, 1.5rem);
+  font-weight: 600;
+  text-align: center;
+  color: var(--ink);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.95);
   pointer-events: none;
 }
 
-.container > * {
-  pointer-events: auto;
+body.scanning .status {
+  color: var(--paper);
+  text-shadow: none;
 }
 
-.status-bar {
-  width: 100%;
-  max-width: 640px;
-  font-size: 18px;
-  font-weight: 500;
-  color: #4ade80;
-  background: rgba(0, 0, 0, 0.75);
-  padding: 12px 16px;
-  border-radius: 8px;
-  border: 2px solid #4ade80;
-  text-align: center;
-  z-index: 100;
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+body.error .status {
+  color: var(--alert);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.95);
 }
 
-.camera-panel {
-  width: 100%;
-  max-width: 640px;
-  margin-top: 12px;
-  background: rgba(0, 0, 0, 0.75);
-  border: 1px solid #334155;
-  border-radius: 8px;
-  padding: 10px 14px;
-  font-size: 14px;
-  z-index: 100;
-}
-
-.camera-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  color: #e2e8f0;
-}
-
-.camera-meta {
-  margin-top: 4px;
-  color: #94a3b8;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-.camera-meta:empty {
-  display: none;
-}
-
-.camera-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #64748b;
-  flex-shrink: 0;
-}
-
-.camera-dot.live {
-  background: #4ade80;
-  box-shadow: 0 0 8px #4ade80;
-}
-
-.camera-dot.pending {
-  background: #facc15;
-}
-
-.camera-dot.error {
-  background: #ef4444;
-}
+/* ---------------------------------------------------------------------------
+   Secondary controls
+   --------------------------------------------------------------------------- */
 
 .switch-camera {
-  margin-top: 10px;
-  background: #1e293b;
-  color: #e2e8f0;
-  border: 1px solid #475569;
-  border-radius: 6px;
-  padding: 8px 14px;
-  font-size: 14px;
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  min-height: 56px;
+  min-width: 200px;
+  padding: 0 24px;
+  font-family: inherit;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: rgba(0, 0, 0, 0.65);
+  border: 2px solid var(--ink);
+  border-radius: 999px;
   cursor: pointer;
-  min-height: 44px;
 }
 
-.switch-camera:hover {
-  background: #334155;
+body.scanning .switch-camera {
+  color: var(--paper);
+  background: rgba(255, 255, 255, 0.75);
+  border-color: var(--paper);
 }
 
 .switch-camera[hidden] {
   display: none;
 }
 
-.controls {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  margin-bottom: 10px;
-}
-
-.toggle-button {
-  width: 160px;
-  height: 160px;
-  border-radius: 50%;
-  border: none;
-  background: linear-gradient(135deg, #0ea5e9, #06b6d4);
-  color: white;
-  font-size: 22px;
-  font-weight: bold;
-  cursor: pointer;
-  box-shadow: 0 8px 24px rgba(6, 182, 212, 0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  touch-action: manipulation;
-}
-
-.toggle-button:active {
-  transform: scale(0.95);
-  box-shadow: 0 4px 12px rgba(6, 182, 212, 0.6);
-}
-
-.toggle-button:disabled {
-  background: #6b7280;
-  cursor: not-allowed;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.toggle-button.scanning {
-  background: linear-gradient(135deg, #ef4444, #f87171);
-  box-shadow: 0 8px 24px rgba(239, 68, 68, 0.4);
-}
-
-.button-text {
-  display: block;
-}
-
-.info-section {
-  margin-top: 20px;
+.camera-info {
+  position: fixed;
+  bottom: 6px;
+  left: 0;
+  right: 0;
   text-align: center;
-  max-width: 400px;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+  font-size: 0.7rem;
+  color: var(--muted);
+  opacity: 0.55;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
 }
 
-.info-section h1 {
-  font-size: 24px;
-  margin-bottom: 8px;
-  color: #f0f9ff;
+.camera-info:empty {
+  display: none;
 }
 
-.info-section p {
-  font-size: 15px;
-  color: #cbd5e1;
-  line-height: 1.5;
+/* Leave room for the switch button when it is present */
+body.has-switch .camera-info {
+  bottom: 84px;
 }
 
-/* Compact layout on small screens */
-@media (max-width: 768px) {
-  .container {
-    padding: 10px;
-  }
+/* ---------------------------------------------------------------------------
+   Preferences
+   --------------------------------------------------------------------------- */
 
-  .info-section {
-    margin-top: 12px;
-  }
-
-  .info-section h1 {
-    font-size: 20px;
-  }
-
-  .info-section p {
-    font-size: 14px;
-  }
-
-  .toggle-button {
-    width: 130px;
-    height: 130px;
-    font-size: 16px;
-  }
-
-  .status-bar {
-    font-size: 16px;
-  }
-}
-
-/* High contrast for accessibility */
 @media (prefers-contrast: more) {
-  .status-bar {
-    border: 3px solid #4ade80;
-    font-weight: 700;
+  #camera-feed {
+    opacity: 0.12;
   }
 
-  .toggle-button {
-    border: 4px solid rgba(255, 255, 255, 0.9);
+  .hint {
+    color: var(--ink);
   }
 }
 
-/* Reduced motion preference */
 @media (prefers-reduced-motion: reduce) {
-  .toggle-button {
-    transition: none;
+  .tap-area:active .action {
+    transform: none;
   }
 }
