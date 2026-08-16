@@ -14,76 +14,85 @@ const CONFIG = {
   focalLengthPx: 400, // approximate focal length for a typical phone camera
   objectSizes: {
     // Average real-world sizes per COCO class (in meters)
-    person: 1.7,
-    chair: 0.9,
-    car: 1.8,
-    bus: 3.0,
-    truck: 2.5,
-    dog: 0.5,
-    cat: 0.25,
-    bottle: 0.25,
-    cup: 0.08,
-    laptop: 0.35,
-    phone: 0.15,
-    book: 0.20,
-    backpack: 0.35,
-    bicycle: 1.5,
-    motorcycle: 1.8,
-    clock: 0.20,
-    vase: 0.25,
-    teddy bear: 0.4,
-    sports ball: 0.24,
-    frisbee: 0.27,
-    skis: 1.65,
-    snowboard: 1.5,
-    sports equipment: 0.3,
-    kite: 0.7,
-    baseball bat: 0.85,
-    baseball glove: 0.25,
-    skateboard: 0.8,
-    surfboard: 1.8,
-    tennis racket: 0.68,
-    bottle: 0.25,
-    wine glass: 0.15,
-    cup: 0.08,
-    fork: 0.20,
-    knife: 0.25,
-    spoon: 0.20,
-    bowl: 0.25,
-    banana: 0.19,
-    apple: 0.08,
-    sandwich: 0.15,
-    orange: 0.08,
-    broccoli: 0.15,
-    carrot: 0.20,
-    hot dog: 0.15,
-    pizza: 0.30,
-    donut: 0.08,
-    cake: 0.20,
-    chair: 0.9,
-    couch: 2.0,
-    potted plant: 0.5,
-    bed: 1.6,
-    dining table: 1.5,
-    toilet: 0.4,
-    tv: 0.6,
-    laptop: 0.35,
-    mouse: 0.08,
-    remote: 0.15,
-    keyboard: 0.45,
-    microwave: 0.5,
-    oven: 0.7,
-    toaster: 0.25,
-    sink: 0.8,
-    refrigerator: 1.7,
-    book: 0.20,
-    clock: 0.20,
-    vase: 0.25,
-    scissors: 0.20,
-    teddy bear: 0.4,
-    hair drier: 0.25,
-    toothbrush: 0.20,
-    default: 0.5, // fallback for unmapped classes
+    "person": 1.7,
+    "bicycle": 1.5,
+    "car": 1.8,
+    "motorcycle": 1.8,
+    "airplane": 35,
+    "bus": 3.0,
+    "train": 25,
+    "truck": 2.5,
+    "boat": 8,
+    "traffic light": 0.5,
+    "fire hydrant": 0.6,
+    "stop sign": 0.7,
+    "parking meter": 2.0,
+    "bench": 1.5,
+    "cat": 0.25,
+    "dog": 0.5,
+    "horse": 2.0,
+    "sheep": 1.5,
+    "cow": 1.8,
+    "elephant": 3.0,
+    "bear": 2.0,
+    "zebra": 2.5,
+    "giraffe": 5.0,
+    "backpack": 0.35,
+    "umbrella": 0.7,
+    "handbag": 0.3,
+    "tie": 1.4,
+    "suitcase": 0.6,
+    "frisbee": 0.27,
+    "skis": 1.65,
+    "snowboard": 1.5,
+    "sports ball": 0.24,
+    "kite": 0.7,
+    "baseball bat": 0.85,
+    "baseball glove": 0.25,
+    "skateboard": 0.8,
+    "surfboard": 1.8,
+    "tennis racket": 0.68,
+    "bottle": 0.25,
+    "wine glass": 0.15,
+    "cup": 0.08,
+    "fork": 0.20,
+    "knife": 0.25,
+    "spoon": 0.20,
+    "bowl": 0.25,
+    "banana": 0.19,
+    "apple": 0.08,
+    "sandwich": 0.15,
+    "orange": 0.08,
+    "broccoli": 0.15,
+    "carrot": 0.20,
+    "hot dog": 0.15,
+    "pizza": 0.30,
+    "donut": 0.08,
+    "cake": 0.20,
+    "chair": 0.9,
+    "couch": 2.0,
+    "potted plant": 0.5,
+    "bed": 1.6,
+    "dining table": 1.5,
+    "toilet": 0.4,
+    "tv": 0.6,
+    "laptop": 0.35,
+    "mouse": 0.08,
+    "remote": 0.15,
+    "keyboard": 0.45,
+    "microwave": 0.5,
+    "oven": 0.7,
+    "toaster": 0.25,
+    "sink": 0.8,
+    "refrigerator": 1.7,
+    "book": 0.20,
+    "clock": 0.20,
+    "vase": 0.25,
+    "scissors": 0.20,
+    "teddy bear": 0.4,
+    "hair drier": 0.25,
+    "toothbrush": 0.20,
+    "default": 0.5, // fallback for unmapped classes
   },
 
   // Urgency tiers (distance in meters)
@@ -116,8 +125,7 @@ let state = {
   videoElement: null,
   detector: null,
   audioContext: null,
-  lastAnnouncements: new Map(), // Track last announced distance per class for change detection
-  lastHeartbeatTime: Date.now(),
+  lastAnnouncements: new Map(), // Track {distance, time} per class for change detection and heartbeat
   detectionStartTime: 0,
   lastDetections: [], // For animation/overlay
 };
@@ -141,24 +149,28 @@ async function initApp() {
   ui.toggleButton.addEventListener("click", toggleScanning);
   state.videoElement = ui.videoElement;
 
-  // Initialize Web Audio API for panning cues
-  try {
-    state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-  } catch (e) {
-    console.warn("Web Audio API not available:", e);
-  }
-
   // Automatically request camera access on page load
   updateStatus("Requesting camera access...");
-  speak("Requesting camera access");
   try {
     await requestCamera();
     updateStatus("Camera ready. Tap to start scanning");
-    speak("Camera ready. Tap anywhere to start scanning");
   } catch (err) {
     console.error("Camera request failed:", err);
-    // User will see error in status and hear it spoken
     ui.toggleButton.disabled = true;
+  }
+}
+
+function initAudioContext() {
+  // Initialize Web Audio API only after user gesture (autoplay policy)
+  if (!state.audioContext) {
+    try {
+      state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      if (state.audioContext.state === "suspended") {
+        state.audioContext.resume();
+      }
+    } catch (e) {
+      console.warn("Web Audio API not available:", e);
+    }
   }
 }
 
@@ -221,7 +233,7 @@ async function loadModel() {
 
     const vision = await FilesetResolver.forVisionTasks(wasmPath);
 
-    const modelAsset = `https://storage.googleapis.com/mediapipe-models/object_detector/${CONFIG.detectModel}/object_detector.tflite`;
+    const modelAsset = `https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/float16/1/efficientdet_lite2.tflite`;
 
     state.detector = await ObjectDetector.createFromOptions(vision, {
       baseOptions: {
@@ -251,6 +263,9 @@ async function loadModel() {
 
 async function startScanning() {
   try {
+    // Initialize audio context after user gesture
+    initAudioContext();
+
     // Only request camera if not already active
     if (!state.cameraActive) {
       await requestCamera();
@@ -340,8 +355,9 @@ async function processDetections(detections) {
       const realSize = CONFIG.objectSizes[label] || CONFIG.objectSizes.default;
       const distance = (realSize * CONFIG.focalLengthPx) / bboxAvgSize;
 
-      const centerX = bbox.originX + bbox.width / 2;
-      const direction = centerX < 0.33 ? "left" : centerX > 0.67 ? "right" : "center";
+      // centerX is normalized (0-1) — bbox.originX and bbox.width are normalized from MediaPipe
+      const centerXNorm = bbox.originX + bbox.width / 2;
+      const direction = centerXNorm < 0.33 ? "left" : centerXNorm > 0.67 ? "right" : "center";
 
       let tier = "far";
       if (distance < CONFIG.urgencyTiers.critical) tier = "critical";
@@ -353,7 +369,7 @@ async function processDetections(detections) {
         confidence,
         direction,
         tier,
-        centerX,
+        centerXNorm,
         bbox,
       };
     })
@@ -366,7 +382,7 @@ async function processDetections(detections) {
     const warning = `${veryClose.label} very close ahead`;
     updateStatus(warning);
     speak(warning, { rate: 1.2, pitch: 1.1 });
-    playPanningTone(veryClose.centerX);
+    playPanningTone(veryClose.centerXNorm);
     return; // Don't process further
   }
 
@@ -386,26 +402,26 @@ async function processDetections(detections) {
   // Determine what to announce
   const toAnnounce = queue.filter((obj) => {
     const key = obj.label;
-    const lastDist = state.lastAnnouncements.get(key);
+    const lastRecord = state.lastAnnouncements.get(key);
 
-    if (lastDist === undefined) return true; // New object
-    if (Math.abs(obj.distance - lastDist) >= CONFIG.distanceBucketSize)
+    if (lastRecord === undefined) return true; // New object
+    if (Math.abs(obj.distance - lastRecord.distance) >= CONFIG.distanceBucketSize)
       return true; // Distance changed
-    if (now - state.lastHeartbeatTime >= CONFIG.heartbeatInterval)
-      return true; // Periodic repeat
+    if (now - lastRecord.time >= CONFIG.heartbeatInterval)
+      return true; // Periodic repeat per object
 
     return false;
   });
 
   // Announce
   if (toAnnounce.length > 0) {
-    state.lastHeartbeatTime = now;
     for (const obj of toAnnounce) {
       const msg = formatAnnouncement(obj);
       updateStatus(msg);
       speak(msg);
-      playPanningTone(obj.centerX);
-      state.lastAnnouncements.set(obj.label, obj.distance);
+      playPanningTone(obj.centerXNorm);
+      // Track distance and announcement time for per-object heartbeat
+      state.lastAnnouncements.set(obj.label, { distance: obj.distance, time: now });
 
       // Stagger announcements slightly
       await sleep(200);
