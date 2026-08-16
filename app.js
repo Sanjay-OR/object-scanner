@@ -132,7 +132,6 @@ let state = {
   scanning: false,
   cameraActive: false,
   modelLoaded: false,
-  userGestured: false, // speech synthesis is blocked before the first interaction
   videoElement: null,
   detector: null,
   audioContext: null,
@@ -142,6 +141,7 @@ let state = {
   lastDetections: [], // For the debug overlay
   cameras: [], // videoinput devices from enumerateDevices()
   activeDeviceId: null,
+  cameraWanted: false, // true once the page has a working camera to restore
 };
 
 // ============================================================================
@@ -170,7 +170,7 @@ function setButtonState(mode) {
     },
     stop: {
       action: "Tap to stop",
-      hint: "Scanning for objects",
+      hint: "Tap anywhere to stop",
       label: "Stop scanning",
     },
     unavailable: {
@@ -210,6 +210,7 @@ async function initApp() {
   try {
     await requestCamera();
     updateStatus("Ready");
+    speak("Ready. Tap anywhere to start.");
   } catch (err) {
     console.error("Camera request failed:", err);
     setButtonState("unavailable");
@@ -309,6 +310,7 @@ async function requestCamera(deviceId = null) {
   await waitForVideoReady(state.videoElement);
 
   state.cameraActive = true;
+  state.cameraWanted = true;
 
   const label = track?.label || "Camera";
   const facing = settings.facingMode ? ` · ${settings.facingMode}` : "";
@@ -319,7 +321,6 @@ async function requestCamera(deviceId = null) {
   console.log("Camera active:", { label, settings, resolution: res });
 
   updateStatus("Camera ready");
-  speak("Camera ready");
 }
 
 function waitForVideoReady(video) {
@@ -356,7 +357,6 @@ async function switchCamera(event) {
   event?.stopPropagation();
   if (state.cameras.length < 2) return;
 
-  state.userGestured = true;
   const idx = state.cameras.findIndex((c) => c.deviceId === state.activeDeviceId);
   const next = state.cameras[(idx + 1) % state.cameras.length];
   stopCamera();
@@ -391,8 +391,9 @@ async function loadModel() {
   if (state.modelLoaded) return;
 
   try {
+    // Status only — startScanning has already spoken, and stacking a second
+    // utterance on top of it just delays the object announcements.
     updateStatus("Getting ready");
-    speak("Getting ready");
 
     // Note: the bundle is published as .mjs — .js 404s on the CDN.
     const { FilesetResolver, ObjectDetector } = await import(
@@ -428,25 +429,27 @@ async function loadModel() {
 // ============================================================================
 
 async function startScanning() {
-  try {
-    // Initialize audio context after user gesture
-    state.userGestured = true;
-    initAudioContext();
+  // Initialize audio context after user gesture
+  initAudioContext();
 
-    // Only request camera if not already active
+  // Flip the screen before any awaiting. The first run has to fetch the wasm
+  // runtime and the model, which takes seconds — waiting for that before
+  // clearing the prompt made the tap feel unresponsive.
+  state.scanning = true;
+  state.detectionStartTime = Date.now();
+  setButtonState("stop");
+  speak("Starting. Tap anywhere to stop.");
+
+  try {
     if (!state.cameraActive) {
       await requestCamera(state.activeDeviceId);
     }
+    if (!state.scanning) return; // stopped while the camera was opening
 
     await loadModel();
-
-    state.scanning = true;
-    state.detectionStartTime = Date.now();
-    setButtonState("stop");
+    if (!state.scanning) return; // stopped while the model was downloading
 
     updateStatus("Scanning");
-    speak("Scanning");
-
     detectionLoop();
   } catch (err) {
     console.error("Failed to start scanning:", err);
@@ -459,15 +462,20 @@ function stopScanning() {
   state.scanning = false;
   state.lastAnnouncements.clear();
   state.lastInterrupt = { label: null, time: 0 };
-  stopCamera();
+  clearOverlay();
   speechSynthesis.cancel();
   setButtonState("start");
   updateStatus("Stopped");
-  speak("Stopped");
+  // Always name the next action: without this a blind user is left on a
+  // silent screen with no clue that tapping again restarts it.
+  speak("Stopped. Tap anywhere to start.");
+
+  // The camera deliberately stays open, matching the state the page loads in,
+  // so tapping start again shows the picture immediately instead of paying
+  // for the permission and warm-up round trip a second time.
 }
 
 function toggleScanning() {
-  state.userGestured = true;
   if (state.scanning) {
     stopScanning();
   } else {
@@ -680,14 +688,22 @@ function speak(text, options = {}) {
     console.warn("Speech Synthesis not available");
     return;
   }
-  // Browsers reject speech before the first user interaction; skip it silently
-  // rather than filling the console with autoplay warnings on page load.
-  if (!state.userGestured) return;
 
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.rate = options.rate || 1.0;
   utterance.pitch = options.pitch || 1.0;
   utterance.volume = 1.0;
+
+  // Speech before the first interaction is refused on iOS and some Android
+  // builds. Attempt it anyway — the greeting is worth having where it is
+  // allowed — and swallow the refusal instead of logging an error for a
+  // condition that is expected and unfixable. Screen reader users still get
+  // the prompt from the button label and the live region.
+  utterance.onerror = (event) => {
+    if (event.error !== "not-allowed" && event.error !== "interrupted") {
+      console.warn("Speech failed:", event.error);
+    }
+  };
 
   speechSynthesis.speak(utterance);
 }
@@ -753,14 +769,20 @@ if (navigator.mediaDevices?.addEventListener) {
 // ============================================================================
 
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden && state.cameraActive && state.scanning) {
+  // Release the camera while backgrounded — holding it would keep the
+  // recording indicator lit on a page the user has navigated away from.
+  if (document.hidden && state.cameraActive) {
     console.log("Tab hidden, stopping camera");
     stopCamera();
-  } else if (!document.hidden && state.scanning && !state.cameraActive) {
+    return;
+  }
+
+  // Coming back: restore whatever the page had before, scanning or not.
+  if (!document.hidden && state.cameraWanted && !state.cameraActive) {
     console.log("Tab visible, reacquiring camera");
     requestCamera(state.activeDeviceId).catch((err) => {
       console.error("Failed to reacquire camera:", err);
-      stopScanning();
+      if (state.scanning) stopScanning();
     });
   }
 });
