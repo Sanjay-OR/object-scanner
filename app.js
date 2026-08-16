@@ -1,6 +1,11 @@
 // YOLOv8 via ONNX Runtime Web — loads dynamically to allow graceful degradation.
 const ONNX_RUNTIME_CDN = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist";
-const YOLOV8_MODEL_URL = "https://huggingface.co/Xenova/yolov8m-coco/resolve/main/model.onnx";
+const YOLOV8_MODEL_URLS = [
+  // Try medium first (better accuracy)
+  "https://huggingface.co/Xenova/yolov8m-coco/resolve/main/model.onnx",
+  // Fallback to nano (faster, smaller)
+  "https://huggingface.co/Xenova/yolov8n-coco/resolve/main/model.onnx",
+];
 
 // ============================================================================
 // CONFIG
@@ -393,25 +398,40 @@ async function loadModel() {
   try {
     updateStatus("Getting ready");
 
-    // Load ONNX Runtime Web
-    const ort = await import(
-      `${ONNX_RUNTIME_CDN}/ort.web.min.js`
-    );
+    console.log("Loading ONNX Runtime...");
+    const ort = await import(`${ONNX_RUNTIME_CDN}/ort.web.min.js`);
+    console.log("ONNX Runtime loaded");
 
-    // Initialize ONNX Runtime with WebAssembly backend for better mobile performance
+    // Initialize ONNX Runtime with WebAssembly backend
     ort.env.wasm.simdSupported = true;
-    ort.env.wasm.numThreads = 1; // Avoid thread contention on phones
+    ort.env.wasm.numThreads = 1;
 
-    // Create session with YOLOv8 model
-    state.onnxSession = await ort.InferenceSession.create(YOLOV8_MODEL_URL, {
-      executionProviders: ["webgpu", "wasm"],
-      graphOptimizationLevel: "all",
-    });
+    // Try each model URL until one works
+    let lastErr = null;
+    for (const modelUrl of YOLOV8_MODEL_URLS) {
+      try {
+        console.log(`Trying model: ${modelUrl}`);
+        updateStatus("Downloading AI model...");
 
-    state.modelLoaded = true;
+        state.onnxSession = await ort.InferenceSession.create(modelUrl, {
+          executionProviders: ["wasm"],
+          graphOptimizationLevel: "all",
+        });
+
+        console.log("Model loaded successfully");
+        state.modelLoaded = true;
+        return;
+      } catch (err) {
+        console.warn(`Model failed (${modelUrl}):`, err.message);
+        lastErr = err;
+      }
+    }
+
+    // All URLs failed
+    throw lastErr || new Error("No model URLs available");
   } catch (err) {
     console.error("Model load failed:", err);
-    const errorMsg = "Could not get ready. Check your internet connection.";
+    const errorMsg = `Could not load AI model. Check your internet. Error: ${err.message}`;
     updateStatus(errorMsg, { error: true });
     speak(errorMsg);
     throw err;
