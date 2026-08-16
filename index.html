@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Object Scanner</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app" class="app">
+    <!-- Hidden video element for camera feed -->
+    <video id="camera-feed" autoplay muted playsinline style="display:none;"></video>
+
+    <!-- Hidden canvas for detection visualization (for debugging) -->
+    <canvas id="detection-canvas" style="display:none;"></canvas>
+
+    <!-- Main control area -->
+    <div class="container">
+      <div class="status-bar" aria-live="polite" aria-atomic="true" id="status-message">
+        Ready to scan. Tap anywhere to start.
+      </div>
+
+      <button id="toggle-button" class="toggle-button" aria-label="Start scanning">
+        <span class="button-text">TAP TO START</span>
+      </button>
+
+      <div class="info-section">
+        <h1>Object Scanner</h1>
+        <p>Point your camera at objects to identify them, their distance, and direction.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- MediaPipe Tasks Vision -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
