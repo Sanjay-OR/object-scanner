@@ -1,17 +1,5 @@
-// TensorFlow.js CocoSSD — reliable, widely-tested model for browser
-const TF_CDN = "https://cdn.jsdelivr.net/npm/@tensorflow";
-const COCO_CLASSES_NAMES = [
-  "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
-  "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "cat", "dog",
-  "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
-  "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite",
-  "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle",
-  "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich",
-  "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
-  "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote",
-  "keyboard", "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock",
-  "vase", "scissors", "teddy bear", "hair drier", "toothbrush"
-];
+// TensorFlow.js and CocoSSD are loaded via script tags in index.html
+// They are available as global objects: window.tf and window.cocoSsd
 
 // ============================================================================
 // CONFIG
@@ -404,13 +392,12 @@ async function loadModel() {
   try {
     updateStatus("Getting ready");
 
-    console.log("Loading TensorFlow.js...");
-    const tf = await import(`${TF_CDN}/tfjs@4.11.0/dist/tf.min.js`);
-    console.log("Loading CocoSSD...");
-    const cocoSsd = await import(`${TF_CDN}/coco-ssd@2.2.3/dist/coco-ssd.min.js`);
+    if (!window.cocoSsd) {
+      throw new Error("CocoSSD library not loaded. Check your internet connection.");
+    }
 
-    console.log("Loading model...");
-    state.detector = await cocoSsd.load();
+    console.log("Loading CocoSSD model...");
+    state.detector = await window.cocoSsd.load();
     console.log("Model loaded successfully");
 
     state.modelLoaded = true;

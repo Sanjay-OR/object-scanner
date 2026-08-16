@@ -31,6 +31,9 @@
        never lands between the user and the button. -->
   <p id="camera-info" class="camera-info" aria-hidden="true"></p>
 
-  <script type="module" src="app.js"></script>
+  <!-- TensorFlow.js and CocoSSD via script tags (more reliable than dynamic imports) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3"></script>
+  <script src="app.js"></script>
 </body>
 </html>
