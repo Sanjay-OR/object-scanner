@@ -1,12 +1,16 @@
-// YOLOv8 via ONNX Runtime Web — multiple CDN fallbacks
-const ONNX_RUNTIME_URLS = [
-  "https://unpkg.com/onnxruntime-web@1.18.0/dist/ort.web.min.js",
-  "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/ort.web.min.js",
-  "https://esm.sh/onnxruntime-web@1.18.0/dist/ort.web.min.js",
-];
-const YOLOV8_MODEL_URLS = [
-  "https://huggingface.co/Xenova/yolov8m-coco/resolve/main/model.onnx",
-  "https://huggingface.co/Xenova/yolov8n-coco/resolve/main/model.onnx",
+// TensorFlow.js CocoSSD — reliable, widely-tested model for browser
+const TF_CDN = "https://cdn.jsdelivr.net/npm/@tensorflow";
+const COCO_CLASSES_NAMES = [
+  "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
+  "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "cat", "dog",
+  "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
+  "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite",
+  "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle",
+  "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich",
+  "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
+  "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote",
+  "keyboard", "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock",
+  "vase", "scissors", "teddy bear", "hair drier", "toothbrush"
 ];
 
 // ============================================================================
@@ -140,7 +144,7 @@ let state = {
   cameraActive: false,
   modelLoaded: false,
   videoElement: null,
-  onnxSession: null, // YOLOv8 ONNX Runtime session
+  detector: null, // TensorFlow.js CocoSSD detector
   audioContext: null,
   lastAnnouncements: new Map(),
   lastInterrupt: { label: null, time: 0 },
@@ -400,57 +404,19 @@ async function loadModel() {
   try {
     updateStatus("Getting ready");
 
-    // Try multiple CDNs for ONNX Runtime
-    let ort = null;
-    let lastRuntimeErr = null;
+    console.log("Loading TensorFlow.js...");
+    const tf = await import(`${TF_CDN}/tfjs@4.11.0/dist/tf.min.js`);
+    console.log("Loading CocoSSD...");
+    const cocoSsd = await import(`${TF_CDN}/coco-ssd@2.2.3/dist/coco-ssd.min.js`);
 
-    for (const runtimeUrl of ONNX_RUNTIME_URLS) {
-      try {
-        console.log(`Trying ONNX Runtime from: ${runtimeUrl}`);
-        ort = await import(runtimeUrl);
-        console.log("ONNX Runtime loaded");
-        break;
-      } catch (err) {
-        console.warn(`ONNX Runtime failed (${runtimeUrl}):`, err.message);
-        lastRuntimeErr = err;
-      }
-    }
+    console.log("Loading model...");
+    state.detector = await cocoSsd.load();
+    console.log("Model loaded successfully");
 
-    if (!ort) {
-      throw lastRuntimeErr || new Error("Could not load ONNX Runtime from any CDN");
-    }
-
-    // Initialize ONNX Runtime
-    if (ort.env?.wasm) {
-      ort.env.wasm.simdSupported = true;
-      ort.env.wasm.numThreads = 1;
-    }
-
-    // Try each model URL until one works
-    let lastModelErr = null;
-    for (const modelUrl of YOLOV8_MODEL_URLS) {
-      try {
-        console.log(`Trying model: ${modelUrl}`);
-        updateStatus("Downloading AI model...");
-
-        state.onnxSession = await ort.InferenceSession.create(modelUrl, {
-          executionProviders: ["wasm"],
-          graphOptimizationLevel: "all",
-        });
-
-        console.log("Model loaded successfully");
-        state.modelLoaded = true;
-        return;
-      } catch (err) {
-        console.warn(`Model failed (${modelUrl}):`, err.message);
-        lastModelErr = err;
-      }
-    }
-
-    throw lastModelErr || new Error("No model URLs available");
+    state.modelLoaded = true;
   } catch (err) {
     console.error("Model load failed:", err);
-    const errorMsg = `Could not load AI model. Check your internet. Error: ${err.message}`;
+    const errorMsg = `Failed to load model: ${err.message}`;
     updateStatus(errorMsg, { error: true });
     speak(errorMsg);
     throw err;
@@ -516,111 +482,23 @@ function toggleScanning() {
   }
 }
 
-// COCO class names for YOLOv8
-const COCO_CLASSES = [
-  "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
-  "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "cat", "dog",
-  "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
-  "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite",
-  "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle",
-  "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich",
-  "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
-  "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote",
-  "keyboard", "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock",
-  "vase", "scissors", "teddy bear", "hair drier", "toothbrush"
-];
-
-async function detectWithYOLOv8(videoElement) {
-  if (!state.onnxSession) throw new Error("Model not loaded");
-
-  const ort = await import(`${ONNX_RUNTIME_CDN}/ort.web.min.js`);
-
-  // Prepare input: letterbox resize to 640x640
-  const canvas = document.createElement("canvas");
-  canvas.width = 640;
-  canvas.height = 640;
-  const ctx = canvas.getContext("2d");
-
-  // Letterbox: scale and pad to 640x640
-  const scale = Math.min(640 / videoElement.videoWidth, 640 / videoElement.videoHeight);
-  const x = (640 - videoElement.videoWidth * scale) / 2;
-  const y = (640 - videoElement.videoHeight * scale) / 2;
-
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, 640, 640);
-  ctx.drawImage(
-    videoElement,
-    x,
-    y,
-    videoElement.videoWidth * scale,
-    videoElement.videoHeight * scale
-  );
-
-  // Extract image data and normalize
-  const imageData = ctx.getImageData(0, 0, 640, 640);
-  const data = imageData.data;
-  const input = new Float32Array(3 * 640 * 640);
-
-  for (let i = 0; i < data.length; i += 4) {
-    input[i / 4] = data[i] / 255;                    // R
-    input[i / 4 + 640 * 640] = data[i + 1] / 255;   // G
-    input[i / 4 + 2 * 640 * 640] = data[i + 2] / 255; // B
-  }
-
-  // Run inference
-  const inputTensor = new ort.Tensor("float32", input, [1, 3, 640, 640]);
-  const results = await state.onnxSession.run({ images: inputTensor });
-
-  // Parse YOLOv8 output (1, 84, 8400)
-  const output = results.output0.data;
-  const detections = [];
-
-  for (let i = 0; i < 8400; i++) {
-    const conf = output[4 * 8400 + i]; // Objectness score
-    if (conf < CONFIG.minConfidence) continue;
-
-    const x = output[0 * 8400 + i];
-    const y = output[1 * 8400 + i];
-    const w = output[2 * 8400 + i];
-    const h = output[3 * 8400 + i];
-
-    let maxClass = 0,
-      maxScore = 0;
-    for (let c = 0; c < 80; c++) {
-      const score = output[(5 + c) * 8400 + i];
-      if (score > maxScore) {
-        maxScore = score;
-        maxClass = c;
-      }
-    }
-
-    const finalScore = conf * maxScore;
-    if (finalScore < CONFIG.minConfidence) continue;
-
-    // Convert from letterbox coords to original video coords
-    const origX = ((x - x) / scale) - x;
-    const origY = ((y - y) / scale) - y;
-    const origW = (w / scale);
-    const origH = (h / scale);
-
-    detections.push({
+// Convert CocoSSD predictions to MediaPipe-compatible format
+function convertCocoSsdToPredictions(predictions, videoWidth, videoHeight) {
+  return predictions
+    .filter(p => p.score >= CONFIG.minConfidence)
+    .map(p => ({
       boundingBox: {
-        originX: (origX - origW / 2) / videoElement.videoWidth,
-        originY: (origY - origH / 2) / videoElement.videoHeight,
-        width: origW / videoElement.videoWidth,
-        height: origH / videoElement.videoHeight,
+        originX: p.bbox[0] / videoWidth,
+        originY: p.bbox[1] / videoHeight,
+        width: p.bbox[2] / videoWidth,
+        height: p.bbox[3] / videoHeight,
       },
-      categories: [{ categoryName: COCO_CLASSES[maxClass], score: finalScore }],
-    });
-  }
-
-  return detections;
+      categories: [{ categoryName: p.class, score: p.score }],
+    }));
 }
 
 async function detectionLoop() {
   if (!state.scanning) return;
-
-  const now = Date.now();
 
   // Detect objects
   if (
@@ -628,7 +506,12 @@ async function detectionLoop() {
     state.modelLoaded
   ) {
     try {
-      const detections = await detectWithYOLOv8(state.videoElement);
+      const predictions = await state.detector.detect(state.videoElement);
+      const detections = convertCocoSsdToPredictions(
+        predictions,
+        state.videoElement.videoWidth,
+        state.videoElement.videoHeight
+      );
 
       if (detections && detections.length > 0) {
         state.lastDetections = detections;
