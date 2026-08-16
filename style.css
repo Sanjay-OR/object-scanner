@@ -11,9 +11,6 @@ body {
   width: 100%;
   height: 100vh;
   overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .app {
@@ -22,25 +19,73 @@ body {
   position: relative;
 }
 
+/* ---------------------------------------------------------------------------
+   Camera preview stage — fills the viewport, everything else floats over it
+   --------------------------------------------------------------------------- */
+
+.stage {
+  position: absolute;
+  inset: 0;
+  background: #0a0a0a;
+  overflow: hidden;
+}
+
+#camera-feed,
+#detection-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+#detection-canvas {
+  pointer-events: none;
+}
+
+.no-signal {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  font-size: 18px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.no-signal[hidden] {
+  display: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Overlay UI
+   --------------------------------------------------------------------------- */
+
 .container {
+  position: relative;
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   padding: 20px;
+  pointer-events: none;
+}
+
+.container > * {
+  pointer-events: auto;
 }
 
 .status-bar {
-  position: fixed;
-  top: 20px;
-  left: 20px;
-  right: 20px;
+  width: 100%;
+  max-width: 640px;
   font-size: 18px;
   font-weight: 500;
   color: #4ade80;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.75);
   padding: 12px 16px;
   border-radius: 8px;
   border: 2px solid #4ade80;
@@ -52,14 +97,93 @@ body {
   justify-content: center;
 }
 
+.camera-panel {
+  width: 100%;
+  max-width: 640px;
+  margin-top: 12px;
+  background: rgba(0, 0, 0, 0.75);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+  z-index: 100;
+}
+
+.camera-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.camera-meta {
+  margin-top: 4px;
+  color: #94a3b8;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.camera-meta:empty {
+  display: none;
+}
+
+.camera-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #64748b;
+  flex-shrink: 0;
+}
+
+.camera-dot.live {
+  background: #4ade80;
+  box-shadow: 0 0 8px #4ade80;
+}
+
+.camera-dot.pending {
+  background: #facc15;
+}
+
+.camera-dot.error {
+  background: #ef4444;
+}
+
+.switch-camera {
+  margin-top: 10px;
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 14px;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.switch-camera:hover {
+  background: #334155;
+}
+
+.switch-camera[hidden] {
+  display: none;
+}
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
 .toggle-button {
-  width: 200px;
-  height: 200px;
+  width: 160px;
+  height: 160px;
   border-radius: 50%;
   border: none;
   background: linear-gradient(135deg, #0ea5e9, #06b6d4);
   color: white;
-  font-size: 24px;
+  font-size: 22px;
   font-weight: bold;
   cursor: pointer;
   box-shadow: 0 8px 24px rgba(6, 182, 212, 0.4);
@@ -91,41 +215,32 @@ body {
 }
 
 .info-section {
-  margin-top: 40px;
+  margin-top: 20px;
   text-align: center;
   max-width: 400px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
 }
 
 .info-section h1 {
-  font-size: 28px;
-  margin-bottom: 12px;
+  font-size: 24px;
+  margin-bottom: 8px;
   color: #f0f9ff;
 }
 
 .info-section p {
-  font-size: 16px;
+  font-size: 15px;
   color: #cbd5e1;
   line-height: 1.5;
 }
 
-/* Detection canvas styling (for debugging, semi-transparent overlay) */
-#detection-canvas {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  display: none !important;
-}
-
-/* Ensure nothing interferes with full-screen tap area on mobile */
+/* Compact layout on small screens */
 @media (max-width: 768px) {
   .container {
     padding: 10px;
   }
 
   .info-section {
-    margin-top: 20px;
+    margin-top: 12px;
   }
 
   .info-section h1 {
@@ -137,16 +252,13 @@ body {
   }
 
   .toggle-button {
-    width: 150px;
-    height: 150px;
-    font-size: 18px;
+    width: 130px;
+    height: 130px;
+    font-size: 16px;
   }
 
   .status-bar {
     font-size: 16px;
-    top: 10px;
-    left: 10px;
-    right: 10px;
   }
 }
 

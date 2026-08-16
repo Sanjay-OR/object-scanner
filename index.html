@@ -8,11 +8,12 @@
 </head>
 <body>
   <div id="app" class="app">
-    <!-- Hidden video element for camera feed -->
-    <video id="camera-feed" autoplay muted playsinline style="display:none;"></video>
-
-    <!-- Hidden canvas for detection visualization (for debugging) -->
-    <canvas id="detection-canvas" style="display:none;"></canvas>
+    <!-- Live camera preview (visible so sighted testers can confirm the feed) -->
+    <div class="stage">
+      <video id="camera-feed" autoplay muted playsinline></video>
+      <canvas id="detection-canvas"></canvas>
+      <div id="no-signal" class="no-signal">No camera signal</div>
+    </div>
 
     <!-- Main control area -->
     <div class="container">
@@ -20,13 +21,24 @@
         Ready to scan. Tap anywhere to start.
       </div>
 
-      <button id="toggle-button" class="toggle-button" aria-label="Start scanning">
-        <span class="button-text">TAP TO START</span>
-      </button>
+      <div class="camera-panel" id="camera-panel">
+        <div class="camera-row">
+          <span class="camera-dot" id="camera-dot" aria-hidden="true"></span>
+          <span id="camera-label">Detecting cameras&hellip;</span>
+        </div>
+        <div class="camera-meta" id="camera-meta"></div>
+        <button id="switch-camera" class="switch-camera" hidden>Switch camera</button>
+      </div>
 
-      <div class="info-section">
-        <h1>Object Scanner</h1>
-        <p>Point your camera at objects to identify them, their distance, and direction.</p>
+      <div class="controls">
+        <button id="toggle-button" class="toggle-button" aria-label="Start scanning">
+          <span class="button-text">TAP TO START</span>
+        </button>
+
+        <div class="info-section">
+          <h1>Object Scanner</h1>
+          <p>Point your camera at objects to identify them, their distance, and direction.</p>
+        </div>
       </div>
     </div>
   </div>
