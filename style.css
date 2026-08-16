@@ -90,23 +90,24 @@ body {
   text-shadow: 0 1px 8px rgba(0, 0, 0, 0.9);
 }
 
-/* Scanning inverts the screen — unmistakable at a glance, and readable with
-   almost any amount of usable vision. The wash is translucent and the feed
-   runs at full brightness underneath, so the preview stays visible instead of
-   being painted over. Composite lands near #e8e8e8, keeping black text above
-   15:1 against it. */
-body.scanning .tap-area {
-  background: rgba(255, 255, 255, 0.82);
-  color: var(--paper);
-}
-
-body.scanning .action,
-body.scanning .hint {
-  text-shadow: none;
+/* Once scanning starts the prompt has done its job: it gets out of the way so
+   the frame is unobstructed, leaving only the spoken status and a quiet
+   reminder of how to stop. No colour inversion — flipping the whole screen
+   light/dark on every start and stop read as a flicker. */
+body.scanning .action {
+  display: none;
 }
 
 body.scanning .hint {
-  color: #4b5563;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 28px;
+  font-size: clamp(0.95rem, 3.5vw, 1.15rem);
+}
+
+body.scanning.has-switch .hint {
+  bottom: 100px;
 }
 
 body.scanning #camera-feed {
@@ -116,10 +117,6 @@ body.scanning #camera-feed {
 .tap-area:focus-visible {
   outline: 6px solid var(--ink);
   outline-offset: -12px;
-}
-
-body.scanning .tap-area:focus-visible {
-  outline-color: var(--paper);
 }
 
 .tap-area:active .action {
@@ -140,18 +137,21 @@ body.scanning .tap-area:focus-visible {
   left: 0;
   right: 0;
   top: 0;
-  padding: 20px 24px;
+  padding: 24px 24px 40px;
   font-size: clamp(1.05rem, 4.5vw, 1.5rem);
   font-weight: 600;
   text-align: center;
   color: var(--ink);
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.95);
   pointer-events: none;
-}
-
-body.scanning .status {
-  color: var(--paper);
-  text-shadow: none;
+  /* Scrim rather than a bordered box: the feed runs at full brightness while
+     scanning, and this keeps the text readable over any scene without
+     drawing a competing rectangle on the screen. */
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.85) 0%,
+    rgba(0, 0, 0, 0.6) 55%,
+    rgba(0, 0, 0, 0) 100%
+  );
 }
 
 body.error .status {
@@ -165,7 +165,7 @@ body.error .status {
 
 .switch-camera {
   position: fixed;
-  bottom: 20px;
+  bottom: 28px;
   left: 50%;
   transform: translateX(-50%);
   min-height: 56px;
@@ -181,19 +181,13 @@ body.error .status {
   cursor: pointer;
 }
 
-body.scanning .switch-camera {
-  color: var(--paper);
-  background: rgba(255, 255, 255, 0.75);
-  border-color: var(--paper);
-}
-
 .switch-camera[hidden] {
   display: none;
 }
 
 .camera-info {
   position: fixed;
-  bottom: 6px;
+  bottom: 4px;
   left: 0;
   right: 0;
   text-align: center;
@@ -208,10 +202,8 @@ body.scanning .switch-camera {
   display: none;
 }
 
-/* Leave room for the switch button when it is present */
-body.has-switch .camera-info {
-  bottom: 84px;
-}
+/* Bottom stack, from the edge up: camera-info (4px), switch button (28px),
+   then the scanning hint, which clears the button when it is present. */
 
 /* ---------------------------------------------------------------------------
    Preferences

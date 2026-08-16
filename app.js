@@ -108,10 +108,15 @@ const CONFIG = {
   },
 
   // Announcement logic
-  maxObjectsPerCycle: 4,
+  maxObjectsPerCycle: 3,
   heartbeatInterval: 5000, // repeat closest object every 5s if nothing changed (ms)
   veryCloseThreshold: 0.7, // interrupt speech if object closer than this
   distanceBucketSize: 0.5, // only re-announce if distance changes by at least this much
+  // Detection runs ~10x/second. Without these two floors the same object is
+  // re-spoken every frame, which cancels the previous utterance mid-word and
+  // comes out as a stutter.
+  minRepeatInterval: 1400, // never repeat the same label faster than this (ms)
+  interruptCooldown: 2000, // and don't re-fire the very-close warning faster than this
 
   // Audio
   panningToneDuration: 150, // ms
@@ -132,6 +137,7 @@ let state = {
   detector: null,
   audioContext: null,
   lastAnnouncements: new Map(), // Track {distance, time} per class for change detection and heartbeat
+  lastInterrupt: { label: null, time: 0 }, // throttles the very-close warning
   detectionStartTime: 0,
   lastDetections: [], // For the debug overlay
   cameras: [], // videoinput devices from enumerateDevices()
@@ -452,6 +458,7 @@ async function startScanning() {
 function stopScanning() {
   state.scanning = false;
   state.lastAnnouncements.clear();
+  state.lastInterrupt = { label: null, time: 0 };
   stopCamera();
   speechSynthesis.cancel();
   setButtonState("start");
@@ -484,7 +491,8 @@ async function detectionLoop() {
       if (detections.detections && detections.detections.length > 0) {
         state.lastDetections = detections.detections;
         drawOverlay(detections.detections);
-        await processDetections(detections.detections);
+        // Deliberately not awaited: announcements must never pace the loop.
+        processDetections(detections.detections);
       } else {
         state.lastDetections = [];
         clearOverlay();
@@ -514,7 +522,7 @@ function toPixelBox(bbox, videoWidth, videoHeight) {
     : { x: bbox.originX, y: bbox.originY, w: bbox.width, h: bbox.height };
 }
 
-async function processDetections(detections) {
+function processDetections(detections) {
   const now = Date.now();
   const videoWidth = state.videoElement.videoWidth || 1;
   const videoHeight = state.videoElement.videoHeight || 1;
@@ -542,15 +550,24 @@ async function processDetections(detections) {
     })
     .sort((a, b) => a.distance - b.distance); // Sort by distance
 
-  // Check for very close object (interrupt)
+  // Check for very close object (interrupt). Barging in on every frame would
+  // cancel the previous utterance before it finished a word, so this fires
+  // only for a newly-close object or after the cooldown.
   const veryClose = objectsWithData.find((o) => o.distance < CONFIG.veryCloseThreshold);
   if (veryClose) {
-    speechSynthesis.cancel();
-    const warning = `${veryClose.label} very close ahead`;
-    updateStatus(warning);
-    speak(warning, { rate: 1.2, pitch: 1.1 });
-    playPanningTone(veryClose.centerXNorm);
-    return; // Don't process further
+    const isNewThreat = veryClose.label !== state.lastInterrupt.label;
+    const cooledDown = now - state.lastInterrupt.time >= CONFIG.interruptCooldown;
+
+    if (isNewThreat || cooledDown) {
+      state.lastInterrupt = { label: veryClose.label, time: now };
+      speechSynthesis.cancel();
+      const warning = `${veryClose.label} very close`;
+      updateStatus(warning);
+      speak(warning, { rate: 1.2, pitch: 1.1 });
+      playPanningTone(veryClose.centerXNorm);
+      state.lastAnnouncements.set(veryClose.label, { distance: veryClose.distance, time: now });
+    }
+    return; // Nothing outranks an imminent collision
   }
 
   // Build urgency queue
@@ -571,26 +588,32 @@ async function processDetections(detections) {
     const lastRecord = state.lastAnnouncements.get(obj.label);
 
     if (lastRecord === undefined) return true; // New object
+
+    // Hard floor first: distance readings jitter frame to frame, and without
+    // this the bucket test below trips almost every cycle.
+    if (now - lastRecord.time < CONFIG.minRepeatInterval) return false;
+
     if (Math.abs(obj.distance - lastRecord.distance) >= CONFIG.distanceBucketSize)
-      return true; // Distance changed
+      return true; // Distance changed meaningfully
     if (now - lastRecord.time >= CONFIG.heartbeatInterval)
       return true; // Periodic repeat per object
 
     return false;
   });
 
-  // Announce
-  for (const obj of toAnnounce) {
-    const msg = formatAnnouncement(obj);
-    updateStatus(msg);
-    speak(msg);
-    playPanningTone(obj.centerXNorm);
-    // Track distance and announcement time for per-object heartbeat
-    state.lastAnnouncements.set(obj.label, { distance: obj.distance, time: now });
+  if (toAnnounce.length === 0) return;
 
-    // Stagger announcements slightly
-    await sleep(200);
-  }
+  // The status line shows only the most urgent object; showing each in turn
+  // made the text flicker several times a second.
+  updateStatus(formatAnnouncement(toAnnounce[0]));
+
+  toAnnounce.forEach((obj, i) => {
+    // speechSynthesis queues utterances itself — no manual staggering needed.
+    speak(formatAnnouncement(obj));
+    // Tones would otherwise all land on the same instant and sum into a blip.
+    playPanningTone(obj.centerXNorm, i * 0.18);
+    state.lastAnnouncements.set(obj.label, { distance: obj.distance, time: now });
+  });
 }
 
 function formatAnnouncement(obj) {
@@ -669,13 +692,13 @@ function speak(text, options = {}) {
   speechSynthesis.speak(utterance);
 }
 
-function playPanningTone(centerX) {
+function playPanningTone(centerX, delaySeconds = 0) {
   if (!state.audioContext) return;
 
   const panValue = (centerX - 0.5) * 2; // -1 (left) to +1 (right)
 
   try {
-    const now = state.audioContext.currentTime;
+    const now = state.audioContext.currentTime + delaySeconds;
     const duration = CONFIG.panningToneDuration / 1000;
 
     // Oscillator for tone
@@ -708,12 +731,11 @@ function playPanningTone(centerX) {
 // ============================================================================
 
 function updateStatus(text, { error = false } = {}) {
+  // Rewriting an aria-live region with identical text makes some screen
+  // readers announce it again, so bail out when nothing actually changed.
+  if (ui.statusMessage.textContent === text) return;
   ui.statusMessage.textContent = text;
   document.body.classList.toggle("error", error);
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ============================================================================
