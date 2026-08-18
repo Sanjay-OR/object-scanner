@@ -29,13 +29,22 @@ A web-based object scanner designed for blind and low-vision users. Points a pho
 
 ### Detection
 - Captures video from your rear camera
-- Runs each frame through the EfficientDet-Lite2 object detector
+- Runs each frame through the EfficientDet-Lite0 object detector
 - Detects 80 common object classes (person, chair, car, dog, bottle, laptop, etc.)
 
 ### Distance Estimation
-- Uses the object's bounding box size and estimated real-world size
-- Applies simple pinhole camera math: `distance ≈ (real_size × focal_length) / bbox_size`
-- Rough approximation, not a precise measurement — accuracy varies by object and lighting
+- Compares the object's bounding box **height** against a table of typical
+  real-world heights (`CONFIG.objectHeights`)
+- Pinhole camera math: `distance ≈ (real_height × focal_length) / bbox_height`
+- Focal length is derived from the live frame width and an assumed field of
+  view, so it stays correct when the capture resolution changes
+- **A rough estimate, not a measurement.** It assumes the object is an average
+  member of its class — a child and a tall adult are both "person", 1.7m — so
+  expect it to be off, sometimes by a lot. Distances are announced as
+  "about ..." and rounded to coarse steps for that reason
+- An object taller than the frame is clipped, so its height is understated and
+  the reported distance is too large — treat close-range readings as an upper
+  bound
 
 ### Direction
 - Reports object position relative to the frame: **left**, **center**, or **right**
@@ -77,11 +86,29 @@ A web-based object scanner designed for blind and low-vision users. Points a pho
 
 ## Calibration
 
-For better distance estimates on your device, you can calibrate the focal length:
+The one number worth tuning per device is the camera's field of view — no
+browser API reports it, so it is assumed.
 
-1. **Ideal**: Hold an object (e.g., a standard chair ~0.9m tall) at known distances and note how the reported distance varies
-2. **Fine-tuning**: Adjust `CONFIG.focalLengthPx` in `app.js` based on empirical results
-3. **Size table**: Add or refine `CONFIG.objectSizes` for objects common in your use case
+1. **Measure**: stand a person (or any object in `CONFIG.objectHeights`) at a
+   known distance — 3 metres is a good choice — and note what the app announces
+2. **Adjust**: change `CONFIG.assumedHorizontalFovDeg` in `app.js`. A *larger*
+   FOV shortens reported distances, a *smaller* one lengthens them. The default
+   of 65° suits a typical phone rear camera; laptop webcams are usually 60–70°
+3. **Check it holds**: repeat at a different distance. The pinhole relation is
+   linear, so one FOV value should fit every distance — if it does not, the
+   error is the assumed object height, not the FOV
+4. **Height table**: refine `CONFIG.objectHeights` for objects you care about.
+   These are *heights*, in metres, and are paired with the bounding box height
+
+## Choosing the detection model
+
+`CONFIG.detectModel` selects between the entries in `MODELS`:
+
+- `lite0` (default) — EfficientDet-Lite0. Fewer confident mislabels and about
+  twice as fast in local testing
+- `lite2` — EfficientDet-Lite2. Higher published COCO mAP (33.97 vs 25.69), so
+  it may localise better on scenes unlike the test set, which in turn feeds the
+  distance estimate
 
 ## Deployment to GitHub Pages
 

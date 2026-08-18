@@ -26,87 +26,98 @@ const CONFIG = {
   preferredFacingMode: "environment", // rear camera on phones; falls back to any camera on desktop
 
   // Distance estimation
-  focalLengthPx: 400, // approximate focal length for a typical phone camera
-  objectSizes: {
-    // Average real-world sizes per COCO class (in meters)
+  //
+  // Focal length is derived from the actual frame width rather than hardcoded,
+  // because focal length in pixels scales with capture resolution: the same
+  // scene at 640px and 1280px would otherwise report distances 2x apart.
+  // The field of view is an assumption — no browser API exposes it — so this
+  // is the one number worth calibrating per device. See README.
+  assumedHorizontalFovDeg: 65, // typical phone rear camera; laptop webcams ~60-70
+
+  // Real-world HEIGHTS in metres, paired with the bounding box height.
+  // Height is used rather than an average of width and height because vertical
+  // extent barely changes with viewing angle, while width does enormously — a
+  // car is ~1.5m tall head-on or side-on, but 1.8m wide head-on and 4.5m wide
+  // side-on. Averaging the two made side-on objects read as much closer.
+  objectHeights: {
     "person": 1.7,
-    "bicycle": 1.5,
-    "car": 1.8,
-    "motorcycle": 1.8,
-    "airplane": 35,
-    "bus": 3.0,
-    "train": 25,
-    "truck": 2.5,
-    "boat": 8,
-    "traffic light": 0.5,
-    "fire hydrant": 0.6,
-    "stop sign": 0.7,
-    "parking meter": 2.0,
-    "bench": 1.5,
-    "cat": 0.25,
+    "bicycle": 1.1,
+    "car": 1.5,
+    "motorcycle": 1.1,
+    "airplane": 12,
+    "bus": 3.2,
+    "train": 4.0,
+    "truck": 2.6,
+    "boat": 2.0,
+    "traffic light": 0.8,
+    "fire hydrant": 0.75,
+    "stop sign": 0.75,
+    "parking meter": 1.2,
+    "bench": 0.9,
+    "cat": 0.3,
     "dog": 0.5,
-    "horse": 2.0,
-    "sheep": 1.5,
-    "cow": 1.8,
+    "horse": 1.6,
+    "sheep": 0.9,
+    "cow": 1.5,
     "elephant": 3.0,
-    "bear": 2.0,
-    "zebra": 2.5,
-    "giraffe": 5.0,
-    "backpack": 0.35,
-    "umbrella": 0.7,
+    "bear": 1.2,
+    "zebra": 1.4,
+    "giraffe": 4.5,
+    "backpack": 0.5,
+    "umbrella": 0.9,
     "handbag": 0.3,
-    "tie": 1.4,
-    "suitcase": 0.6,
+    "tie": 0.5,
+    "suitcase": 0.7,
     "frisbee": 0.27,
-    "skis": 1.65,
+    "skis": 1.7,
     "snowboard": 1.5,
-    "sports ball": 0.24,
-    "kite": 0.7,
+    "sports ball": 0.22,
+    "kite": 0.8,
     "baseball bat": 0.85,
-    "baseball glove": 0.25,
-    "skateboard": 0.8,
-    "surfboard": 1.8,
+    "baseball glove": 0.3,
+    "skateboard": 0.2,
+    "surfboard": 0.5,
     "tennis racket": 0.68,
     "bottle": 0.25,
     "wine glass": 0.15,
-    "cup": 0.08,
-    "fork": 0.20,
-    "knife": 0.25,
-    "spoon": 0.20,
-    "bowl": 0.25,
-    "banana": 0.19,
+    "cup": 0.10,
+    "fork": 0.03,
+    "knife": 0.03,
+    "spoon": 0.03,
+    "bowl": 0.10,
+    "banana": 0.05,
     "apple": 0.08,
-    "sandwich": 0.15,
+    "sandwich": 0.08,
     "orange": 0.08,
     "broccoli": 0.15,
-    "carrot": 0.20,
-    "hot dog": 0.15,
-    "pizza": 0.30,
-    "donut": 0.08,
-    "cake": 0.20,
+    "carrot": 0.05,
+    "hot dog": 0.06,
+    "pizza": 0.04,
+    "donut": 0.05,
+    "cake": 0.15,
     "chair": 0.9,
-    "couch": 2.0,
-    "potted plant": 0.5,
-    "bed": 1.6,
-    "dining table": 1.5,
-    "toilet": 0.4,
+    "couch": 0.8,
+    "potted plant": 0.6,
+    "bed": 0.6,
+    "dining table": 0.75,
+    "toilet": 0.75,
     "tv": 0.6,
-    "laptop": 0.35,
-    "mouse": 0.08,
-    "remote": 0.15,
-    "keyboard": 0.45,
-    "microwave": 0.5,
-    "oven": 0.7,
-    "toaster": 0.25,
-    "sink": 0.8,
+    "laptop": 0.25,
+    "mouse": 0.04,
+    "remote": 0.03,
+    "keyboard": 0.03,
+    "microwave": 0.3,
+    "oven": 0.9,
+    "toaster": 0.2,
+    "sink": 0.25,
     "refrigerator": 1.7,
-    "book": 0.20,
-    "clock": 0.20,
-    "vase": 0.25,
-    "scissors": 0.20,
+    "book": 0.24,
+    "clock": 0.3,
+    "vase": 0.3,
+    "scissors": 0.2,
     "teddy bear": 0.4,
     "hair drier": 0.25,
-    "toothbrush": 0.20,
+    "toothbrush": 0.02,
     "default": 0.5, // fallback for unmapped classes
   },
 
@@ -519,6 +530,13 @@ async function detectionLoop() {
   setTimeout(() => detectionLoop(), CONFIG.detectionInterval);
 }
 
+// Focal length in pixels for the frame actually being captured. Derived from
+// the horizontal field of view, so it stays correct as resolution changes.
+function focalLengthPx(frameWidth) {
+  const halfFov = (CONFIG.assumedHorizontalFovDeg * Math.PI) / 180 / 2;
+  return frameWidth / 2 / Math.tan(halfFov);
+}
+
 // MediaPipe Tasks Vision reports boundingBox in PIXELS of the input frame.
 // Guard against builds that hand back normalized values instead.
 function toPixelBox(bbox, videoWidth, videoHeight) {
@@ -547,10 +565,13 @@ function processDetections(detections) {
       const confidence = d.categories[0]?.score || 0;
 
       const box = toPixelBox(d.boundingBox, videoWidth, videoHeight);
-      const bboxAvgSize = (box.w + box.h) / 2;
 
-      const realSize = CONFIG.objectSizes[label] || CONFIG.objectSizes.default;
-      const distance = (realSize * CONFIG.focalLengthPx) / bboxAvgSize;
+      // Pinhole: distance = real_height * focal_length / apparent_height.
+      // Caveat: an object taller than the frame is clipped, so box.h
+      // understates it and the distance comes out too large — exactly when the
+      // object is closest. Announcements should be read as an upper bound there.
+      const realHeight = CONFIG.objectHeights[label] || CONFIG.objectHeights.default;
+      const distance = (realHeight * focalLengthPx(videoWidth)) / Math.max(box.h, 1);
 
       const centerXNorm = (box.x + box.w / 2) / videoWidth;
       const direction = centerXNorm < 0.33 ? "left" : centerXNorm > 0.67 ? "right" : "center";
@@ -635,10 +656,13 @@ function formatAnnouncement(obj) {
   return `${obj.label}, ${distStr}, ${dirStr}`;
 }
 
+// A single camera plus an assumed object height cannot resolve distance to the
+// centimetre. Announcing "78 centimetres" invites a trust these numbers have
+// not earned, so round to coarse steps and say "about".
 function formatDistance(meters) {
-  if (meters < 1) return `${Math.round(meters * 100)} centimeters`;
-  if (meters < 10) return `${meters.toFixed(1)} meters`;
-  return `${Math.round(meters)} meters`;
+  if (meters < 1) return `about ${Math.max(10, Math.round(meters * 10) * 10)} centimeters`;
+  if (meters < 10) return `about ${(Math.round(meters * 2) / 2).toFixed(1)} meters`;
+  return `about ${Math.round(meters / 5) * 5} meters`;
 }
 
 // ============================================================================
