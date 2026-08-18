@@ -7,7 +7,13 @@
       "Bash(grep -E '\\\\.\\(html|js|css|md\\)$')",
       "Bash(git remote *)",
       "Bash(git branch *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "PowerShell(vercel --version 2>&1)",
+      "PowerShell(npm --version 2>&1)",
+      "PowerShell(npm install -g vercel 2>&1)",
+      "PowerShell(tail -3)",
+      "Bash(git pull *)",
+      "Bash(git fetch *)"
     ]
   }
 }
