@@ -1,5 +1,16 @@
-// TensorFlow.js and CocoSSD are loaded via script tags in index.html
-// They are available as global objects: window.tf and window.cocoSsd
+// MediaPipe is imported dynamically inside loadModel() so that a CDN failure
+// degrades to "camera works, detection doesn't" instead of killing the module.
+const MEDIAPIPE_CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8";
+
+// Benchmarked against coco-ssd and efficientdet_lite2 over 11 images with known
+// contents (see commit message). All three found the same 17 of 21 expected
+// labels; lite0 was the only one with zero confident mislabels, and the
+// fastest. lite2 is kept switchable — it scores higher on published COCO mAP,
+// so it may localise better on scenes unlike the test set.
+const MODELS = {
+  lite0: "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float32/1/efficientdet_lite0.tflite",
+  lite2: "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/float16/1/efficientdet_lite2.tflite",
+};
 
 // ============================================================================
 // CONFIG
@@ -9,7 +20,7 @@ const CONFIG = {
   // Detection
   minConfidence: 0.5,
   detectionInterval: 100, // ms between detection frames
-  detectModel: "lite2", // "lite2" or "lite0"; fallback to lite0 if lite2 exceeds latency budget
+  detectModel: "lite0", // key into MODELS; lite0 measured fewer wrong labels and ~2x faster than lite2
 
   // Camera
   preferredFacingMode: "environment", // rear camera on phones; falls back to any camera on desktop
@@ -390,20 +401,29 @@ async function loadModel() {
   if (state.modelLoaded) return;
 
   try {
+    // Status only — startScanning has already spoken, and stacking a second
+    // utterance on top of it just delays the object announcements.
     updateStatus("Getting ready");
 
-    if (!window.cocoSsd) {
-      throw new Error("CocoSSD library not loaded. Check your internet connection.");
-    }
+    // Note: the bundle is published as .mjs — .js 404s on the CDN.
+    const { FilesetResolver, ObjectDetector } = await import(
+      `${MEDIAPIPE_CDN}/vision_bundle.mjs`
+    );
 
-    console.log("Loading CocoSSD model...");
-    state.detector = await window.cocoSsd.load();
-    console.log("Model loaded successfully");
+    const vision = await FilesetResolver.forVisionTasks(`${MEDIAPIPE_CDN}/wasm`);
+    const modelAsset = MODELS[CONFIG.detectModel] || MODELS.lite0;
+
+    state.detector = await ObjectDetector.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: modelAsset, delegate: "GPU" },
+      scoreThreshold: CONFIG.minConfidence,
+      maxResults: 10,
+      runningMode: "VIDEO",
+    });
 
     state.modelLoaded = true;
   } catch (err) {
     console.error("Model load failed:", err);
-    const errorMsg = `Failed to load model: ${err.message}`;
+    const errorMsg = "Could not get ready. Check your internet connection.";
     updateStatus(errorMsg, { error: true });
     speak(errorMsg);
     throw err;
@@ -469,21 +489,6 @@ function toggleScanning() {
   }
 }
 
-// Convert CocoSSD predictions to MediaPipe-compatible format
-function convertCocoSsdToPredictions(predictions, videoWidth, videoHeight) {
-  return predictions
-    .filter(p => p.score >= CONFIG.minConfidence)
-    .map(p => ({
-      boundingBox: {
-        originX: p.bbox[0] / videoWidth,
-        originY: p.bbox[1] / videoHeight,
-        width: p.bbox[2] / videoWidth,
-        height: p.bbox[3] / videoHeight,
-      },
-      categories: [{ categoryName: p.class, score: p.score }],
-    }));
-}
-
 async function detectionLoop() {
   if (!state.scanning) return;
 
@@ -493,16 +498,13 @@ async function detectionLoop() {
     state.modelLoaded
   ) {
     try {
-      const predictions = await state.detector.detect(state.videoElement);
-      const detections = convertCocoSsdToPredictions(
-        predictions,
-        state.videoElement.videoWidth,
-        state.videoElement.videoHeight
-      );
+      const result = state.detector.detectForVideo(state.videoElement, Date.now());
+      const detections = result.detections || [];
 
-      if (detections && detections.length > 0) {
+      if (detections.length > 0) {
         state.lastDetections = detections;
         drawOverlay(detections);
+        // Deliberately not awaited: announcements must never pace the loop.
         processDetections(detections);
       } else {
         state.lastDetections = [];
